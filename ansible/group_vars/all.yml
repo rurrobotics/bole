@@ -21,6 +21,8 @@ bole_build_mode: live
 bole_target: pi
 
 # ---- System ------------------------------------------------------------------
+# bole_hostname and bole_timezone are the defaults written into bole.yaml;
+# bole-apply-config applies whatever bole.yaml says.
 bole_hostname: bole
 bole_timezone: Europe/Belgrade
 bole_locale: en_US.UTF-8

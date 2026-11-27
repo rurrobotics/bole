@@ -70,19 +70,7 @@
     content: |
       LANG={{ bole_locale }}
 
-# timedatectl needs a running systemd, so set the zone through files (works in chroot).
-- name: Set timezone link
-  ansible.builtin.file:
-    src: /usr/share/zoneinfo/{{ bole_timezone }}
-    dest: /etc/localtime
-    state: link
-    force: true
-
-- name: Set timezone name
-  ansible.builtin.copy:
-    dest: /etc/timezone
-    mode: "0644"
-    content: "{{ bole_timezone }}\n"
+# The timezone is set by bole-apply-config from bole.yaml (bootconfig role).
 
 - name: Configure Raspberry Pi hardware interfaces
   ansible.builtin.blockinfile:

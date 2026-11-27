@@ -4,18 +4,8 @@
     name: "{{ network_packages }}"
     state: present
 
-- name: Set hostname
-  ansible.builtin.copy:
-    dest: /etc/hostname
-    mode: "0644"
-    content: "{{ bole_hostname }}\n"
-  notify: Apply hostname
-
-- name: Map hostname to loopback
-  ansible.builtin.lineinfile:
-    path: /etc/hosts
-    regexp: '^127\.0\.1\.1\s'
-    line: "127.0.1.1 {{ bole_hostname }}"
+# The hostname is set by bole-apply-config from bole.yaml (bootconfig role),
+# so a later bole.yaml change is never reverted by this role.
 
 - name: Enable mDNS (avahi)
   ansible.builtin.systemd_service:
