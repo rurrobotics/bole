@@ -1,0 +1,58 @@
+---
+- name: Install OpenSSH server
+  ansible.builtin.apt:
+    name: openssh-server
+    state: present
+
+# OpenSSH uses the first value it reads, and drop-ins are read in lexical order.
+# 05-bole-runtime.conf is written by bole-apply-config from bole.yaml, so it wins.
+- name: Remove cloud-init's sshd drop-in
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/50-cloud-init.conf
+    state: absent
+  notify: Reload ssh
+
+- name: Install default runtime sshd settings (rewritten from bole.yaml at boot)
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/05-bole-runtime.conf
+    mode: "0644"
+    force: false
+    content: |
+      # Managed by bole-apply-config from bole.yaml — edit bole.yaml instead.
+      PasswordAuthentication {{ 'yes' if ssh_password_auth else 'no' }}
+  notify: Reload ssh
+
+- name: Install static sshd hardening
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/10-bole.conf
+    mode: "0644"
+    content: |
+      # Managed by bole (ansible/roles/ssh).
+      PermitRootLogin no
+      KbdInteractiveAuthentication no
+      X11Forwarding no
+  notify: Reload ssh
+
+# The image ships without host keys (removed by the cleanup role) so every Pi
+# gets unique keys. Generate any missing keys right before sshd starts.
+- name: Create ssh.service drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/ssh.service.d
+    state: directory
+    mode: "0755"
+
+- name: Ensure host keys exist before sshd starts
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ssh.service.d/10-bole-hostkeys.conf
+    mode: "0644"
+    content: |
+      [Service]
+      ExecStartPre=
+      ExecStartPre=/usr/bin/ssh-keygen -A
+      ExecStartPre=/usr/sbin/sshd -t
+  notify: Reload systemd
+
+- name: Enable SSH
+  ansible.builtin.systemd_service:
+    name: ssh.service
+    enabled: true

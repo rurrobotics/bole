@@ -74,3 +74,7 @@ bole_user_groups:
   - spi
 # Allow sudo without a password (convenient for development robots).
 bole_user_passwordless_sudo: false
+
+# ---- SSH ---------------------------------------------------------------------
+# Default for password login; can be changed at runtime in bole.yaml.
+ssh_password_auth: true

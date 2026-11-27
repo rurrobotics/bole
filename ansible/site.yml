@@ -10,3 +10,5 @@
       tags: [base]
     - role: users
       tags: [users]
+    - role: ssh
+      tags: [ssh]
