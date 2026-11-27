@@ -1,0 +1,80 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# bole: helper for managing a bole robot.
+set -euo pipefail
+
+UNITS=(bole-firstboot.service bole-config.service bole-ros-workspace.service bole-ros-launch.service)
+
+usage() {
+    cat <<USAGE
+Usage: bole <command>
+
+  apply      Re-apply /boot/firmware/bole.yaml now (network, SSH, ROS settings)
+             and restart the ROS services if their settings changed
+  check      Validate bole.yaml without changing anything
+  rebuild    Force a fresh pull + rosdep + colcon build, then restart the launch
+  restart    Restart the ROS launch command
+  status     Show the state of the bole services
+  logs       Follow the logs of the bole services (Ctrl+C to stop)
+  edit       Open bole.yaml in an editor, validate it, then offer to apply
+USAGE
+}
+
+need_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        exec sudo "$0" "$@"
+    fi
+}
+
+ros_env_sum() { sha256sum /etc/bole/ros.env 2>/dev/null | cut -d' ' -f1 || true; }
+
+cmd="${1:-}"
+case "$cmd" in
+    apply)
+        need_root "$@"
+        before=$(ros_env_sum)
+        bole-apply-config --now
+        if [ "$before" != "$(ros_env_sum)" ]; then
+            echo "ROS settings changed, rebuilding/restarting ROS services"
+            systemctl restart bole-ros-workspace.service
+            systemctl restart bole-ros-launch.service
+        fi
+        ;;
+    check)
+        bole-apply-config --check
+        ;;
+    rebuild)
+        need_root "$@"
+        rm -f /var/lib/bole/workspace.key
+        systemctl restart bole-ros-workspace.service
+        systemctl restart bole-ros-launch.service
+        ;;
+    restart)
+        need_root "$@"
+        systemctl restart bole-ros-launch.service
+        ;;
+    status)
+        systemctl --no-pager status "${UNITS[@]}" || true
+        ;;
+    logs)
+        journalctl -b -f "${UNITS[@]/#/-u}"
+        ;;
+    edit)
+        need_root "$@"
+        "${EDITOR:-nano}" /boot/firmware/bole.yaml
+        if bole-apply-config --check; then
+            read -r -p "Apply now? [y/N] " answer
+            if [ "$answer" = y ] || [ "$answer" = Y ]; then
+                exec "$0" apply
+            fi
+        fi
+        ;;
+    -h | --help | help | "")
+        usage
+        ;;
+    *)
+        echo "bole: unknown command '$cmd'" >&2
+        usage >&2
+        exit 2
+        ;;
+esac

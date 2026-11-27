@@ -27,6 +27,12 @@
     mode: "0755"
   loop: [bole-apply-config, bole-firstboot]
 
+- name: Install the bole command
+  ansible.builtin.copy:
+    src: bole
+    dest: /usr/local/bin/bole
+    mode: "0755"
+
 - name: Create bole directories
   ansible.builtin.file:
     path: "{{ item.path }}"
