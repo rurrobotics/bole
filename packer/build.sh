@@ -61,6 +61,8 @@ version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
 ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections >/dev/null
 packer/install-plugin.sh
 packer validate -var "version=$version" "${extra[@]}" "$@" packer/
+# The arm builder writes the image into output/ but does not create it.
+mkdir -p output
 
 "${elevate[@]}" env \
     "PATH=$PATH" \

@@ -72,6 +72,7 @@ jobs:
 
       - name: Build image
         run: |
+          mkdir -p output # the arm builder does not create it
           sudo --preserve-env=PACKER_PLUGIN_PATH,PACKER_CACHE_DIR,ANSIBLE_COLLECTIONS_PATH,DONT_SETUP_QEMU \
             env "PATH=$PATH" packer build -var "version=${{ steps.version.outputs.version }}" packer/
           sudo chown -R "$(id -u):$(id -g)" output packer_cache
