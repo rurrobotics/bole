@@ -36,12 +36,14 @@
     path: /var/lib/dbus/machine-id
     state: absent
 
+# Not /tmp or ~/.ansible: Ansible runs from there while this play is running.
+# Packer clears them after the playbook (see packer/bole.pkr.hcl).
 - name: Remove build leftovers
   ansible.builtin.shell: |
     set -e
     find /var/log -type f \( -name '*.gz' -o -name '*.[0-9]' -o -name '*.old' \) -delete
     find /var/log -type f -exec truncate -s 0 {} +
-    rm -rf /tmp/* /var/tmp/* /root/.ansible /root/.cache /home/*/.ansible /home/*/.cache
+    rm -rf /var/tmp/* /root/.cache /home/*/.cache
     rm -f /root/.bash_history /home/*/.bash_history
   args:
     executable: /bin/bash

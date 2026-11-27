@@ -89,10 +89,14 @@ build {
     script = "${path.root}/verify.sh"
   }
 
+  # Final cleanup, after Ansible and verify.sh are done (Ansible can't delete
+  # its own working files in /tmp and ~/.ansible while it runs).
   provisioner "shell" {
     inline = [
       "rm -f /etc/resolv.conf",
       "mv /etc/resolv.conf.bole-bak /etc/resolv.conf",
+      "rm -rf /root/.ansible /home/*/.ansible",
+      "find /tmp -mindepth 1 -delete",
     ]
   }
 
