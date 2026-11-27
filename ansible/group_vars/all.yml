@@ -78,3 +78,13 @@ bole_user_passwordless_sudo: false
 # ---- SSH ---------------------------------------------------------------------
 # Default for password login; can be changed at runtime in bole.yaml.
 ssh_password_auth: true
+
+# ---- Network -----------------------------------------------------------------
+# Default WiFi regulatory domain (two-letter country code), overridable in bole.yaml.
+wifi_country: RS
+network_packages:
+  - wpasupplicant
+  - wireless-regdb
+  - iw
+  - avahi-daemon # makes the Pi reachable as <hostname>.local
+  - libnss-mdns

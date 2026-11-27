@@ -1,0 +1,40 @@
+---
+- name: Install network packages
+  ansible.builtin.apt:
+    name: "{{ network_packages }}"
+    state: present
+
+- name: Set hostname
+  ansible.builtin.copy:
+    dest: /etc/hostname
+    mode: "0644"
+    content: "{{ bole_hostname }}\n"
+  notify: Apply hostname
+
+- name: Map hostname to loopback
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s'
+    line: "127.0.1.1 {{ bole_hostname }}"
+
+- name: Enable mDNS (avahi)
+  ansible.builtin.systemd_service:
+    name: avahi-daemon.service
+    enabled: true
+
+# Interfaces are marked optional in the generated netplan, but make sure a
+# missing WiFi or unplugged cable never stalls boot for two minutes.
+- name: Create wait-online drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/systemd-networkd-wait-online.service.d
+    state: directory
+    mode: "0755"
+
+- name: Limit network wait-online to any interface, 30 seconds
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/systemd-networkd-wait-online.service.d/10-bole.conf
+    mode: "0644"
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/lib/systemd/systemd-networkd-wait-online --any --timeout=30

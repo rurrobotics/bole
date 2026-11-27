@@ -1,0 +1,5 @@
+---
+- name: Apply hostname
+  ansible.builtin.hostname:
+    name: "{{ bole_hostname }}"
+  when: bole_build_mode == 'live'

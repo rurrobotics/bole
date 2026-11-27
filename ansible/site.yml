@@ -12,3 +12,5 @@
       tags: [users]
     - role: ssh
       tags: [ssh]
+    - role: network
+      tags: [network]
