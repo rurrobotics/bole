@@ -1,0 +1,84 @@
+---
+# bole.yaml on the boot partition replaces cloud-init, which would otherwise
+# create its own user and network config from user-data/network-config.
+- name: Disable cloud-init
+  ansible.builtin.copy:
+    dest: /etc/cloud/cloud-init.disabled
+    mode: "0644"
+    content: "Disabled by bole: configuration comes from /boot/firmware/bole.yaml\n"
+
+- name: Remove cloud-init seed files from the boot partition
+  ansible.builtin.file:
+    path: /boot/firmware/{{ item }}
+    state: absent
+  loop: [user-data, network-config, meta-data]
+  when: bole_build_mode == 'image' and bole_target == 'pi'
+
+- name: Remove cloud-init generated netplan config
+  ansible.builtin.file:
+    path: /etc/netplan/50-cloud-init.yaml
+    state: absent
+  when: bole_target == 'pi'
+
+- name: Install bole scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: /usr/local/sbin/{{ item }}
+    mode: "0755"
+  loop: [bole-apply-config, bole-firstboot]
+
+- name: Create bole directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /etc/bole, mode: "0755" }
+    - { path: /var/lib/bole, mode: "0700" }
+    - { path: /boot/firmware, mode: "0755" }
+
+- name: Record build-time defaults
+  ansible.builtin.template:
+    src: build.yaml.j2
+    dest: /etc/bole/build.yaml
+    mode: "0644"
+
+- name: Install default bole.yaml (never overwrites an existing one)
+  ansible.builtin.template:
+    src: bole.yaml.j2
+    dest: /boot/firmware/bole.yaml
+    # vfat can't store modes; 0755 matches its default mount mask, so chmod succeeds
+    mode: "0755"
+    force: false
+
+- name: Install systemd units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: /etc/systemd/system/{{ item }}
+    mode: "0644"
+  loop: [bole-config.service, bole-firstboot.service]
+  notify: Reload systemd
+
+- name: Enable bole-config
+  ansible.builtin.systemd_service:
+    name: bole-config.service
+    enabled: true
+
+- name: Enable first-boot service on Raspberry Pi
+  ansible.builtin.systemd_service:
+    name: bole-firstboot.service
+    enabled: "{{ bole_target == 'pi' }}"
+
+# Pre-generate netplan, ros.env etc. from the default bole.yaml so the image
+# boots with working config even before bole-config runs.
+- name: Apply default bole.yaml inside the image
+  ansible.builtin.command: /usr/local/sbin/bole-apply-config --offline
+  register: bootconfig_apply
+  changed_when: "'no changes' not in bootconfig_apply.stderr"
+  when: bole_build_mode == 'image'
+
+- name: Apply bole.yaml on the running system
+  ansible.builtin.command: /usr/local/sbin/bole-apply-config
+  register: bootconfig_apply
+  changed_when: "'no changes' not in bootconfig_apply.stderr"
+  when: bole_build_mode == 'live'

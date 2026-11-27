@@ -1,0 +1,8 @@
+# Build-time values baked into this image (read by bole-apply-config as
+# defaults for settings missing from bole.yaml). Do not edit; use bole.yaml.
+user: {{ bole_user | to_json }}
+hostname: {{ bole_hostname | to_json }}
+timezone: {{ bole_timezone | to_json }}
+ssh_password_auth: {{ ssh_password_auth | bool | to_json }}
+wifi_country: {{ wifi_country | to_json }}
+ros_distro: {{ ros_distro | to_json }}

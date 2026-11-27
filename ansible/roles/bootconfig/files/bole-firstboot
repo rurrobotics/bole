@@ -1,0 +1,26 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# bole first boot: grow the root filesystem to fill the SD card and generate
+# unique SSH host keys. Runs once (bole-firstboot.service).
+set -eu
+
+log() { echo "bole-firstboot: $*"; }
+
+root_src=$(findmnt -no SOURCE /)
+part=$(basename "$(readlink -f "$root_src")")
+disk=$(lsblk -no PKNAME "/dev/$part")
+num=$(cat "/sys/class/block/$part/partition")
+
+# growpart exits 1 when there is nothing to grow
+if growpart "/dev/$disk" "$num"; then
+    resize2fs "/dev/$part"
+    log "grew /dev/$part to fill /dev/$disk"
+else
+    log "root partition already fills the disk"
+fi
+
+ssh-keygen -A
+log "SSH host keys ready"
+
+mkdir -p /var/lib/bole
+touch /var/lib/bole/firstboot.done

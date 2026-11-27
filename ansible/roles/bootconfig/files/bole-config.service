@@ -1,0 +1,17 @@
+[Unit]
+Description=Apply bole.yaml from the boot partition
+Documentation=file:///boot/firmware/bole.yaml
+DefaultDependencies=no
+After=local-fs.target bole-firstboot.service
+Before=network-pre.target systemd-networkd.service ssh.service avahi-daemon.service shutdown.target
+Wants=network-pre.target
+Conflicts=shutdown.target
+RequiresMountsFor=/boot/firmware
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bole-apply-config
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

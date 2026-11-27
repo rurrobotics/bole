@@ -1,0 +1,15 @@
+[Unit]
+Description=bole first boot (grow root filesystem, SSH host keys)
+DefaultDependencies=no
+After=local-fs.target
+Before=bole-config.service ssh.service sysinit.target shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=!/var/lib/bole/firstboot.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bole-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

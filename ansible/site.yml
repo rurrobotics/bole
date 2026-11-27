@@ -16,3 +16,5 @@
       tags: [network]
     - role: ros
       tags: [ros]
+    - role: bootconfig
+      tags: [bootconfig]
