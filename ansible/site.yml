@@ -5,6 +5,11 @@
 - name: Provision bole
   hosts: all
   become: true
+  # A fixed PATH for the target. The chroot connection would otherwise inherit
+  # the build host's PATH, which on hosts with a merged /usr/sbin (e.g. Fedora)
+  # lacks the sbin directories Ubuntu tools like dpkg need.
+  environment:
+    PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
   roles:
     - role: base
       tags: [base]
