@@ -49,6 +49,10 @@ base_packages:
   - openssl
 base_extra_packages: []
 
+# Raspberry Pi model the image targets: all, pi4 or pi5. Selects the
+# config.txt section ([all]/[pi4]/[pi5]) the settings below are written to.
+# Every image still boots on both models; this only scopes the bole settings.
+pi_model: all
 # Raspberry Pi hardware interfaces (written to /boot/firmware/config.txt).
 pi_enable_i2c: true
 pi_enable_spi: true

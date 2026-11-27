@@ -1,4 +1,4 @@
-[all]
+[{{ pi_model }}]
 {% if pi_enable_i2c %}
 dtparam=i2c_arm=on
 {% endif %}
@@ -11,3 +11,4 @@ enable_uart=1
 {% for line in pi_config_extra %}
 {{ line }}
 {% endfor %}
+[all]

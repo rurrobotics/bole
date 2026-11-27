@@ -4,7 +4,8 @@
     that:
       - bole_build_mode in ['image', 'live']
       - bole_target in ['pi', 'vagrant']
-    fail_msg: "bole_build_mode must be image|live and bole_target pi|vagrant"
+      - pi_model in ['all', 'pi4', 'pi5']
+    fail_msg: "bole_build_mode must be image|live, bole_target pi|vagrant and pi_model all|pi4|pi5"
     quiet: true
 
 - name: Prevent services from starting inside the image chroot
