@@ -1,0 +1,18 @@
+---
+# bole.yaml used by the Vagrant test VM (stands in for the SD card's file).
+hostname: "bole-vagrant"
+timezone: "Europe/Belgrade"
+ssh:
+  password_auth: true
+wifi:
+  country: "RS"
+  networks: []
+ethernet:
+  # Vagrant manages the VM's network interface itself.
+  enabled: false
+ros:
+  repo: "https://github.com/ros2/examples.git"
+  branch: "lyrical"
+  build_args: "--symlink-install --packages-select examples_rclpy_minimal_publisher"
+  launch: "ros2 run examples_rclpy_minimal_publisher publisher_member_function"
+  domain_id: 42
