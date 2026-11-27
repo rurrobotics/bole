@@ -132,7 +132,7 @@ def validate(cfg: dict[str, Any], root: Path) -> dict[str, Any]:
 
     # timezone
     tz = cfg["timezone"]
-    _require(isinstance(tz, str) and tz and ".." not in tz, "'timezone' must be a name like Europe/Belgrade")
+    _require(isinstance(tz, str) and bool(tz) and ".." not in tz, "'timezone' must be a name like Europe/Belgrade")
     _require((root / "usr/share/zoneinfo" / tz).is_file(), f"unknown 'timezone' {tz!r} (see timedatectl list-timezones)")
 
     # user
@@ -516,8 +516,13 @@ def apply(cfg: dict[str, Any], ctx: Context) -> list[str]:
         changed = remove_file(ctx, "/etc/netplan/60-bole.yaml")
     else:
         changed = write_file(ctx, "/etc/netplan/60-bole.yaml", netplan, mode=0o600)
-    if changed or ctx.now:
-        ctx.run(["netplan", "apply" if ctx.now else "generate"])
+    if ctx.now:
+        ctx.run(["netplan", "apply"])
+    elif changed:
+        # At boot (before networkd starts): regenerate, and let systemd see new
+        # units such as netplan-wpa-wlan0.service right away, not next boot.
+        ctx.run(["netplan", "generate"])
+        ctx.run(["systemctl", "daemon-reload"])
 
     if not ctx.offline:
         write_file(ctx, "/var/lib/bole/state.json", json.dumps(state, indent=2) + "\n", mode=0o600)
@@ -537,7 +542,7 @@ def report_error(config: Path, message: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--root", default="/", type=Path, help="system root (for image builds and tests)")
     parser.add_argument("--config", type=Path, help="bole.yaml path (default: <root>/boot/firmware/bole.yaml)")
     parser.add_argument("--build-config", type=Path, help="build.yaml path (default: <root>/etc/bole/build.yaml)")
