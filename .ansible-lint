@@ -4,6 +4,9 @@ exclude_paths:
   - .vagrant/
   - output/
   - packer_cache/
+  - ansible/collections/
+  - collections/
+  - .packer/
   - .github/
   - tests/fixtures/
 skip_list:

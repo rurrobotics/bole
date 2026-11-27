@@ -4,6 +4,8 @@ ignore: |
   .vagrant/
   output/
   packer_cache/
+  ansible/collections/
+  .packer/
 rules:
   line-length:
     max: 160
