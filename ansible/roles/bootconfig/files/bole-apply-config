@@ -237,7 +237,12 @@ def load_config(path: Path, build: dict[str, Any], root: Path) -> dict[str, Any]
         raw = None
     except yaml.YAMLError as exc:
         raise ConfigError(f"bole.yaml is not valid YAML: {exc}") from exc
-    return validate(merge(defaults(build), raw), root)
+    cfg = validate(merge(defaults(build), raw), root)
+    # Checked here, not while applying, so a bad config never half-applies.
+    key = cfg["ros"]["deploy_key"]
+    if key and not (path.parent / key).is_file():
+        raise ConfigError(f"'ros.deploy_key' file {key!r} not found next to bole.yaml")
+    return cfg
 
 
 # --------------------------------------------------------------------------
@@ -489,8 +494,6 @@ def apply(cfg: dict[str, Any], ctx: Context) -> list[str]:
     deploy_key = None
     if cfg["ros"]["deploy_key"]:
         src = ctx.config.parent / cfg["ros"]["deploy_key"]
-        if not src.is_file():
-            raise ConfigError(f"'ros.deploy_key' file {cfg['ros']['deploy_key']!r} not found next to bole.yaml")
         content = src.read_text().replace("\r\n", "\n")
         if not content.endswith("\n"):
             content += "\n"
