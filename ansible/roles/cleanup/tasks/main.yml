@@ -1,0 +1,70 @@
+---
+# Image builds only: leave the image small and free of per-machine state.
+- name: Remove unneeded packages and clean the apt cache
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true
+    clean: true
+
+- name: Remove apt package lists (recreated by apt-get update)
+  ansible.builtin.shell: rm -rf /var/lib/apt/lists/*
+  changed_when: true
+
+# Every Pi must get its own SSH host keys and machine-id at first boot.
+- name: Find SSH host keys
+  ansible.builtin.find:
+    paths: /etc/ssh
+    patterns: ssh_host_*
+  register: cleanup_host_keys
+
+- name: Remove SSH host keys
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ cleanup_host_keys.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Empty machine-id (systemd generates a new one at first boot)
+  ansible.builtin.copy:
+    dest: /etc/machine-id
+    content: ""
+    mode: "0444"
+
+- name: Remove D-Bus machine-id copy
+  ansible.builtin.file:
+    path: /var/lib/dbus/machine-id
+    state: absent
+
+- name: Remove build leftovers
+  ansible.builtin.shell: |
+    set -e
+    find /var/log -type f \( -name '*.gz' -o -name '*.[0-9]' -o -name '*.old' \) -delete
+    find /var/log -type f -exec truncate -s 0 {} +
+    rm -rf /tmp/* /var/tmp/* /root/.ansible /root/.cache /home/*/.ansible /home/*/.cache
+    rm -f /root/.bash_history /home/*/.bash_history
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Allow services to start again
+  ansible.builtin.file:
+    path: /usr/sbin/policy-rc.d
+    state: absent
+
+# Free space still holds deleted data from the base image. Zero it so the
+# compressed image is smaller. fstrim punches holes when the loop device
+# supports discard; otherwise fall back to writing zeros.
+- name: Trim free space
+  ansible.builtin.command: fstrim -v /
+  register: cleanup_fstrim
+  changed_when: cleanup_fstrim.rc == 0
+  failed_when: false
+
+- name: Zero free space (fallback when trim is unsupported)
+  ansible.builtin.shell: |
+    dd if=/dev/zero of=/bole-zero bs=4M status=none || true
+    sync
+    rm -f /bole-zero
+  changed_when: true
+  when: cleanup_fstrim.rc != 0

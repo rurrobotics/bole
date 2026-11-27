@@ -20,3 +20,6 @@
       tags: [bootconfig]
     - role: ros_workspace
       tags: [ros_workspace]
+    - role: cleanup
+      tags: [cleanup]
+      when: bole_build_mode == 'image'
