@@ -7,7 +7,7 @@ Instructions for AI coding agents (and humans) working on **bole**.
 bole builds a flashable **Ubuntu Server image with ROS 2** for **Raspberry Pi 4 and 5**.
 
 - **Ansible** (`ansible/`) does all the provisioning.
-- **Packer** (`packer/`) with the [packer-plugin-builder-arm](https://github.com/mkaczanowski/packer-plugin-builder-arm) plugin downloads the official Ubuntu raspi image, grows it, loop-mounts it and runs the Ansible playbook inside a chroot.
+- **Packer** (`packer/`) with the [packer-plugin-builder-arm](https://github.com/mkaczanowski/packer-plugin-builder-arm) plugin (installed by `packer/install-plugin.sh`, not `packer init`, because of an upstream versioning bug) downloads the official Ubuntu raspi image, grows it, loop-mounts it and runs the Ansible playbook inside a chroot.
 - **GitHub Actions** (`.github/workflows/`) builds the image on native arm64 runners on every push and attaches it to a Release on `v*` tags.
 - **Runtime configuration** lives in `bole.yaml` on the FAT boot partition (`/boot/firmware/bole.yaml` on the Pi). The `bole-config.service` re-applies it on every boot, so WiFi, passwords, SSH keys and the ROS project can change without rebuilding the image.
 
@@ -19,17 +19,17 @@ Defaults: Ubuntu 26.04 LTS, ROS 2 Lyrical Luth, `ros-base`. The distro is a vari
 |---|---|
 | `ansible/site.yml` | Main playbook, which applies all roles in order |
 | `ansible/group_vars/all.yml` | Every build-time default, documented inline |
-| `ansible/inventory/` | `image.yml` (chroot, used by Packer), `vagrant.yml`, `pi.example.yml` (a live Pi over SSH) |
+| `ansible/inventory/` | `image.yml` (chroot, used by Packer), `pi.example.yml` (a live Pi over SSH); Vagrant generates its own |
 | `ansible/roles/base` | Locale, timezone, packages, snapd removal, Pi `config.txt` |
 | `ansible/roles/users` | Default user and groups |
 | `ansible/roles/ssh` | sshd drop-in, host key handling |
 | `ansible/roles/network` | netplan/wpasupplicant, regulatory domain, avahi |
 | `ansible/roles/ros` | ROS 2 apt source, packages, rosdep, environment |
-| `ansible/roles/bootconfig` | `bole-apply-config`, first-boot service, default `bole.yaml` |
+| `ansible/roles/bootconfig` | `bole-apply-config`, first-boot service, default `bole.yaml`, `bole` command |
 | `ansible/roles/ros_workspace` | Clone/build/launch the user's ROS project at boot |
 | `ansible/roles/cleanup` | Image-only cleanup (apt cache, machine-id, logs) |
-| `packer/` | Packer template, variables, `verify.sh`, `build.sh` wrapper |
-| `tests/` | pytest unit tests for `bole-apply-config` |
+| `packer/` | Packer template, variables, `install-plugin.sh`, `verify.sh`, `build.sh` wrapper |
+| `tests/` | pytest unit tests for `bole-apply-config`; `tests/vagrant/` test `bole.yaml` and end-to-end checks |
 | `Vagrantfile` | Full playbook run in a libvirt VM |
 
 ## Hard rules
@@ -47,9 +47,9 @@ Defaults: Ubuntu 26.04 LTS, ROS 2 Lyrical Luth, `ros-base`. The distro is a vari
 
 ```bash
 # Lint and test (CI runs the same)
-yamllint .
-ansible-lint ansible/
-shellcheck packer/*.sh ansible/roles/*/files/*.sh
+yamllint --strict .
+(cd ansible && ansible-lint)
+shellcheck packer/*.sh tests/vagrant/*.sh ansible/roles/bootconfig/files/bole ansible/roles/bootconfig/files/bole-firstboot
 packer fmt -check packer/ && packer validate packer/
 pytest tests/
 
