@@ -1,0 +1,57 @@
+---
+- name: Check that the ROS distro matches the Ubuntu release
+  ansible.builtin.assert:
+    that: ros_distro in ros_supported_distros[ansible_facts['distribution_release']] | default([])
+    fail_msg: >-
+      ROS 2 '{{ ros_distro }}' has no binary packages for Ubuntu
+      {{ ansible_facts['distribution_release'] }}. Supported here:
+      {{ ros_supported_distros[ansible_facts['distribution_release']] | default([]) | join(', ') }}
+    quiet: true
+
+- name: Check whether the ROS apt source is installed
+  ansible.builtin.command: dpkg-query -W -f=${Version} ros2-apt-source
+  register: ros_apt_source_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install the ROS apt source package
+  ansible.builtin.apt:
+    deb: >-
+      https://github.com/ros-infrastructure/ros-apt-source/releases/download/{{ ros_apt_source_version }}/ros2-apt-source_{{
+      ros_apt_source_version }}.{{ ansible_facts['distribution_release'] }}_all.deb
+  when: ros_apt_source_installed.stdout is not search(ros_apt_source_version)
+
+- name: Install ROS 2 and development tools
+  ansible.builtin.apt:
+    name: "{{ ['ros-' + ros_distro + '-' + ros_package, 'ros-dev-tools'] + ros_extra_packages }}"
+    state: present
+    update_cache: true
+
+- name: Initialise rosdep
+  ansible.builtin.command: rosdep init
+  args:
+    creates: /etc/ros/rosdep/sources.list.d/20-default.list
+
+- name: Update rosdep cache for the default user
+  ansible.builtin.command: runuser -u {{ bole_user }} -- rosdep update --rosdistro {{ ros_distro }}
+  args:
+    creates: /home/{{ bole_user }}/.ros/rosdep/sources.cache
+
+- name: Create /etc/bole
+  ansible.builtin.file:
+    path: /etc/bole
+    state: directory
+    mode: "0755"
+
+- name: Install ROS environment script
+  ansible.builtin.template:
+    src: ros-env.sh.j2
+    dest: /etc/bole/ros-env.sh
+    mode: "0644"
+
+- name: Source the ROS environment in the default user's shell
+  ansible.builtin.blockinfile:
+    path: /home/{{ bole_user }}/.bashrc
+    marker: "# {mark} bole ROS environment"
+    block: |
+      [ -f /etc/bole/ros-env.sh ] && . /etc/bole/ros-env.sh

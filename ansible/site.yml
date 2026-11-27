@@ -14,3 +14,5 @@
       tags: [ssh]
     - role: network
       tags: [network]
+    - role: ros
+      tags: [ros]

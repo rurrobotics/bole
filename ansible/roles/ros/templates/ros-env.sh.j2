@@ -1,0 +1,16 @@
+# Managed by bole (ansible/roles/ros). Sourced from ~/.bashrc and by the
+# bole-ros-* services. Runtime values come from /etc/bole/ros.env, which
+# bole-apply-config writes from bole.yaml on every boot.
+if [ -f /etc/bole/ros.env ]; then
+    set -a
+    . /etc/bole/ros.env
+    set +a
+fi
+
+. /opt/ros/{{ ros_distro }}/setup.bash
+
+_bole_ws="${BOLE_ROS_WORKSPACE:-$HOME/ros2_ws}"
+if [ -f "$_bole_ws/install/setup.bash" ]; then
+    . "$_bole_ws/install/setup.bash"
+fi
+unset _bole_ws

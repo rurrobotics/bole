@@ -88,3 +88,15 @@ network_packages:
   - iw
   - avahi-daemon # makes the Pi reachable as <hostname>.local
   - libnss-mdns
+
+# ---- ROS 2 -------------------------------------------------------------------
+# Must match the Ubuntu release of the base image:
+#   26.04 (resolute) -> lyrical    24.04 (noble) -> jazzy or kilted
+ros_distro: lyrical
+# ros-base (headless), ros-core (minimal) or desktop (GUI tools, much larger).
+ros_package: ros-base
+# Extra apt packages, e.g. ["ros-lyrical-rmw-cyclonedds-cpp", "ros-lyrical-xacro"].
+ros_extra_packages: []
+# Version of https://github.com/ros-infrastructure/ros-apt-source (installs
+# the ROS apt repository and signing key). Pinned for reproducible builds.
+ros_apt_source_version: "1.3.0"

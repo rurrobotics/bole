@@ -1,0 +1,5 @@
+---
+# ROS 2 distros with Tier 1 binary packages per Ubuntu release.
+ros_supported_distros:
+  noble: [jazzy, kilted]
+  resolute: [lyrical]
