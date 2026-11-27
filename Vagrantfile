@@ -12,9 +12,6 @@
 
 BOX = ENV.fetch("BOLE_VAGRANT_BOX", "cloud-image/ubuntu-26.04")
 BOX_VERSION = "20260927.0.0"
-# Direct link to the amd64 libvirt build, for Vagrant < 2.4 (see below).
-BOX_AMD64_URL = "https://vagrantcloud.com/cloud-image/boxes/ubuntu-26.04/versions/" \
-                "#{BOX_VERSION}/providers/libvirt/amd64/vagrant.box"
 
 Vagrant.configure("2") do |config|
   if ENV.key?("BOLE_VAGRANT_BOX")
@@ -26,9 +23,10 @@ Vagrant.configure("2") do |config|
   else
     # Vagrant < 2.4 (e.g. Fedora's 2.3.x) doesn't understand multi-architecture
     # boxes and may pick the arm64 build, which hangs at "Booting from Hard
-    # Disk...". Download the amd64 build directly under its own name instead.
+    # Disk...". It also treats direct vagrantcloud.com links as metadata, so
+    # point it at local metadata that lists only the amd64 libvirt build.
     config.vm.box = "bole/ubuntu-26.04-amd64"
-    config.vm.box_url = BOX_AMD64_URL
+    config.vm.box_url = "file://#{File.join(__dir__, "tests/vagrant/box-amd64.json")}"
   end
   config.vm.hostname = "bole-vagrant"
   config.vm.synced_folder ".", "/vagrant", disabled: true

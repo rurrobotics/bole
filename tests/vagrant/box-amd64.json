@@ -1,0 +1,15 @@
+{
+  "name": "bole/ubuntu-26.04-amd64",
+  "description": "Canonical's cloud-image/ubuntu-26.04 box, amd64 libvirt build only. Used by Vagrant < 2.4, which cannot choose a box architecture.",
+  "versions": [
+    {
+      "version": "20260927.0.0",
+      "providers": [
+        {
+          "name": "libvirt",
+          "url": "https://vagrantcloud.com/cloud-image/boxes/ubuntu-26.04/versions/20260927.0.0/providers/libvirt/amd64/vagrant.box"
+        }
+      ]
+    }
+  ]
+}
