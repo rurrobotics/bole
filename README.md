@@ -174,7 +174,7 @@ Most people don't need this: CI builds the image on every push. Build locally to
 
 ### Requirements
 
-- Linux with `sudo` (loop devices and chroot need root)
+- Linux with `sudo` or `doas` (loop devices and chroot need root; `build.sh` picks whichever exists, or set `BOLE_SUDO=...`)
 - [Packer](https://developer.hashicorp.com/packer/install) ≥ 1.11, `ansible-core`, `python3`, `curl`, `xz`, `sfdisk`, `parted`, `e2fsprogs`, `qemu-img`, `kpartx`
 - On **x86_64** hosts, aarch64 user-mode emulation (builds are several times slower than on arm64):
 
@@ -193,7 +193,7 @@ sudo apt install ansible-core xz-utils fdisk parted e2fsprogs qemu-utils kpartx 
 ```
 
 `build.sh` installs the Ansible collections and the
-[packer-plugin-builder-arm](https://github.com/mkaczanowski/packer-plugin-builder-arm) plugin locally (`ansible/collections/`, `.packer/`), then runs `sudo packer build`.
+[packer-plugin-builder-arm](https://github.com/mkaczanowski/packer-plugin-builder-arm) plugin locally (`ansible/collections/`, `.packer/`), then runs `packer build` as root (via sudo or doas).
 Any extra arguments are passed to Packer:
 
 ```bash

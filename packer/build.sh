@@ -4,7 +4,7 @@
 #   ./packer/build.sh -var ros_distro=jazzy
 #
 # Needs: packer, ansible-core, xz, sfdisk, parted, e2fsprogs, qemu-img, kpartx
-# and sudo. On x86_64 hosts also qemu user-mode emulation for aarch64
+# and sudo or doas (override with BOLE_SUDO=...). On x86_64 hosts also qemu user-mode emulation for aarch64
 # (Fedora: qemu-user-static-aarch64, Debian/Ubuntu: qemu-user-static or
 # qemu-user + qemu-user-binfmt).
 set -euo pipefail
@@ -42,14 +42,33 @@ else
     echo "build.sh: x86_64 host, emulating arm64 with $qemu (this is slow)"
 fi
 
+# Root is needed for loop devices and chroot. Only the plain
+# "<tool> env VAR=value command" form is used, so sudo and doas both work.
+if [ "$(id -u)" -eq 0 ]; then
+    elevate=()
+elif [ -n "${BOLE_SUDO:-}" ]; then
+    elevate=("$BOLE_SUDO")
+elif command -v sudo >/dev/null; then
+    elevate=(sudo)
+elif command -v doas >/dev/null; then
+    elevate=(doas)
+else
+    die "run as root, or install sudo or doas"
+fi
+
 version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections >/dev/null
 packer/install-plugin.sh
 packer validate -var "version=$version" "${extra[@]}" "$@" packer/
 
-sudo --preserve-env=PACKER_PLUGIN_PATH,PACKER_CACHE_DIR,ANSIBLE_COLLECTIONS_PATH,DONT_SETUP_QEMU \
-    env "PATH=$PATH" packer build -var "version=$version" "${extra[@]}" "$@" packer/
+"${elevate[@]}" env \
+    "PATH=$PATH" \
+    "PACKER_PLUGIN_PATH=$PACKER_PLUGIN_PATH" \
+    "PACKER_CACHE_DIR=$PACKER_CACHE_DIR" \
+    "ANSIBLE_COLLECTIONS_PATH=$ANSIBLE_COLLECTIONS_PATH" \
+    ${DONT_SETUP_QEMU:+"DONT_SETUP_QEMU=$DONT_SETUP_QEMU"} \
+    packer build -var "version=$version" "${extra[@]}" "$@" packer/
 
-sudo chown -R "$(id -u):$(id -g)" output packer_cache
+"${elevate[@]}" chown -R "$(id -u):$(id -g)" output packer_cache
 echo "build.sh: done, image in output/"
