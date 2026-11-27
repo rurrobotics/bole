@@ -19,7 +19,8 @@ packer {
 }
 
 locals {
-  output_name = "bole-${var.version}-ubuntu-${var.ubuntu_version}-${var.ros_distro}-arm64"
+  model_label = var.pi_model == "all" ? "pi4-pi5" : var.pi_model
+  output_name = "bole-${var.version}-${local.model_label}-ubuntu-${var.ubuntu_version}-${var.ros_distro}-arm64"
   output_dir  = "${path.cwd}/output"
   ansible_dir = "${path.root}/../ansible"
   # Must match ansible/inventory/image.yml
@@ -80,7 +81,7 @@ build {
   provisioner "shell-local" {
     inline = [
       "cd ${local.ansible_dir}",
-      "ansible-playbook -i inventory/image.yml site.yml -e ros_distro=${var.ros_distro} ${var.ansible_extra_args}",
+      "ansible-playbook -i inventory/image.yml site.yml -e ros_distro=${var.ros_distro} -e pi_model=${var.pi_model} ${var.ansible_extra_args}",
     ]
   }
 

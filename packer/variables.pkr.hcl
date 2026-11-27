@@ -26,6 +26,17 @@ variable "ros_distro" {
   description = "ROS 2 distro; must have binaries for the Ubuntu release (26.04: lyrical, 24.04: jazzy/kilted)."
 }
 
+variable "pi_model" {
+  type        = string
+  default     = "all"
+  description = "Target Raspberry Pi model: all, pi4 or pi5. Scopes config.txt settings and labels the image."
+
+  validation {
+    condition     = contains(["all", "pi4", "pi5"], var.pi_model)
+    error_message = "The pi_model must be one of: all, pi4, pi5."
+  }
+}
+
 variable "image_size" {
   type        = string
   default     = "8G"
