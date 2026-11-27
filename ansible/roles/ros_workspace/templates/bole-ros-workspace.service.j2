@@ -1,0 +1,15 @@
+[Unit]
+Description=Clone and build the ROS project from bole.yaml
+After=network-online.target bole-config.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/bole/ros-workspace
+RemainAfterExit=yes
+# Building on a Pi can take a long time
+TimeoutStartSec=infinity
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

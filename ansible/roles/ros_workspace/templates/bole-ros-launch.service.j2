@@ -1,0 +1,17 @@
+[Unit]
+Description=Run the ROS launch command from bole.yaml
+After=bole-ros-workspace.service
+Wants=bole-ros-workspace.service
+
+[Service]
+User={{ bole_user }}
+ExecCondition=/bin/sh -c '. /etc/bole/ros.env && test -n "$BOLE_ROS_LAUNCH"'
+ExecStart=/usr/local/lib/bole/ros-launch
+Restart=on-failure
+RestartSec=5
+# ros2 launch shuts down its nodes cleanly on SIGINT
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

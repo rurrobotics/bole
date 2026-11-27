@@ -1,0 +1,10 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Managed by bole (ansible/roles/ros_workspace).
+# Runs ros.launch from bole.yaml with the ROS environment and built workspace.
+set -eo pipefail
+# shellcheck source=/dev/null
+. /etc/bole/ros-env.sh
+cd "$BOLE_ROS_WORKSPACE" 2>/dev/null || cd "$HOME"
+echo "bole-ros-launch: $BOLE_ROS_LAUNCH"
+exec bash -c "$BOLE_ROS_LAUNCH"

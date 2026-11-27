@@ -1,0 +1,27 @@
+---
+- name: Create bole library directory
+  ansible.builtin.file:
+    path: /usr/local/lib/bole
+    state: directory
+    mode: "0755"
+
+- name: Install workspace scripts
+  ansible.builtin.template:
+    src: "{{ item }}.sh.j2"
+    dest: /usr/local/lib/bole/{{ item }}
+    mode: "0755"
+  loop: [ros-workspace, ros-launch]
+
+- name: Install workspace services
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: /etc/systemd/system/{{ item }}
+    mode: "0644"
+  loop: [bole-ros-workspace.service, bole-ros-launch.service]
+  notify: Reload systemd
+
+- name: Enable workspace services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+  loop: [bole-ros-workspace.service, bole-ros-launch.service]

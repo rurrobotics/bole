@@ -18,3 +18,5 @@
       tags: [ros]
     - role: bootconfig
       tags: [bootconfig]
+    - role: ros_workspace
+      tags: [ros_workspace]

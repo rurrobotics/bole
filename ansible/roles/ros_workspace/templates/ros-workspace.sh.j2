@@ -1,0 +1,107 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Managed by bole (ansible/roles/ros_workspace).
+#
+# Clone or update the ROS project named in bole.yaml (ros.repo) into
+# <workspace>/src, install its dependencies with rosdep and build it with
+# colcon. Rebuilds only when the repo, branch, build args or commit changed.
+set -euo pipefail
+
+USER_NAME={{ bole_user | quote }}
+ROS_DISTRO_NAME={{ ros_distro | quote }}
+USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
+STATE_DIR=/var/lib/bole
+
+log() { echo "bole-ros-workspace: $*"; }
+as_user() { runuser -u "$USER_NAME" -- env HOME="$USER_HOME" "$@"; }
+retry() {
+    local i
+    for i in 1 2 3 4 5; do
+        "$@" && return 0
+        log "attempt $i failed, retrying in $((i * 5))s"
+        sleep $((i * 5))
+    done
+    return 1
+}
+
+if [ ! -f /etc/bole/ros.env ]; then
+    log "/etc/bole/ros.env missing, nothing to do"
+    exit 0
+fi
+set -a
+# shellcheck source=/dev/null
+. /etc/bole/ros.env
+set +a
+
+if [ -z "${BOLE_ROS_REPO:-}" ]; then
+    log "ros.repo is empty in bole.yaml, nothing to do"
+    exit 0
+fi
+
+ws="$BOLE_ROS_WORKSPACE"
+name=$(basename "${BOLE_ROS_REPO%.git}")
+src="$ws/src/$name"
+
+install -d -o "$USER_NAME" -g "$USER_NAME" "$ws" "$ws/src"
+
+ssh_opts="-o StrictHostKeyChecking=accept-new"
+if [ -n "${BOLE_ROS_DEPLOY_KEY:-}" ]; then
+    ssh_opts="$ssh_opts -i $BOLE_ROS_DEPLOY_KEY -o IdentitiesOnly=yes"
+fi
+export GIT_SSH_COMMAND="ssh $ssh_opts"
+
+# A different repository than last time: move the old clone out of src/ so
+# colcon doesn't build both. Nothing is deleted.
+previous=$(cat "$STATE_DIR/workspace.src" 2>/dev/null || true)
+if [ -n "$previous" ] && [ "$previous" != "$src" ] && [ -d "$previous" ]; then
+    backup="$ws/.bole-old/$(basename "$previous")-$(date +%Y%m%d%H%M%S)"
+    log "repository changed, moving $previous to $backup"
+    install -d -o "$USER_NAME" -g "$USER_NAME" "$ws/.bole-old"
+    mv "$previous" "$backup"
+fi
+
+if [ ! -d "$src/.git" ]; then
+    log "cloning $BOLE_ROS_REPO"
+    branch_args=()
+    if [ -n "${BOLE_ROS_BRANCH:-}" ]; then
+        branch_args=(--branch "$BOLE_ROS_BRANCH")
+    fi
+    retry as_user git clone --recurse-submodules "${branch_args[@]}" "$BOLE_ROS_REPO" "$src"
+elif [ "${BOLE_ROS_UPDATE_ON_BOOT:-1}" = 1 ]; then
+    as_user git -C "$src" remote set-url origin "$BOLE_ROS_REPO"
+    if retry as_user git -C "$src" fetch --prune origin; then
+        as_user git -C "$src" remote set-head origin --auto >/dev/null || true
+        branch="${BOLE_ROS_BRANCH:-$(as_user git -C "$src" symbolic-ref --short refs/remotes/origin/HEAD | sed 's|^origin/||')}"
+        if [ "$(as_user git -C "$src" rev-parse --abbrev-ref HEAD)" != "$branch" ]; then
+            as_user git -C "$src" checkout "$branch" || as_user git -C "$src" checkout -b "$branch" "origin/$branch"
+        fi
+        # Fast-forward only: local commits or edits on the robot are never thrown away.
+        if ! as_user git -C "$src" merge --ff-only "origin/$branch"; then
+            log "WARNING: local changes prevent updating $branch, building the current checkout"
+        fi
+        as_user git -C "$src" submodule update --init --recursive || true
+    else
+        log "WARNING: fetch failed (offline?), building the current checkout"
+    fi
+fi
+echo "$src" > "$STATE_DIR/workspace.src"
+
+head=$(as_user git -C "$src" rev-parse HEAD)
+key=$(printf '%s\n' "$BOLE_ROS_REPO" "${BOLE_ROS_BRANCH:-}" "${BOLE_ROS_BUILD_ARGS:-}" "$head" "$ROS_DISTRO_NAME" "$ws" | sha256sum | cut -d' ' -f1)
+if [ "$key" = "$(cat "$STATE_DIR/workspace.key" 2>/dev/null || true)" ] && [ -f "$ws/install/setup.bash" ]; then
+    log "workspace is up to date at ${head:0:12}"
+    exit 0
+fi
+
+log "installing dependencies"
+apt-get update -q || log "WARNING: apt-get update failed"
+as_user rosdep update --rosdistro "$ROS_DISTRO_NAME" || log "WARNING: rosdep update failed, using cached data"
+ROS_HOME="$USER_HOME/.ros" rosdep install --from-paths "$ws/src" --ignore-src -y -r --rosdistro "$ROS_DISTRO_NAME"
+
+log "building ${head:0:12} with: colcon build ${BOLE_ROS_BUILD_ARGS:-}"
+# shellcheck disable=SC2016
+as_user bash -c 'source /opt/ros/$0/setup.bash && cd "$1" && eval colcon build "$2"' \
+    "$ROS_DISTRO_NAME" "$ws" "${BOLE_ROS_BUILD_ARGS:-}"
+
+echo "$key" > "$STATE_DIR/workspace.key"
+log "build finished"
