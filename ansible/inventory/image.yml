@@ -1,0 +1,12 @@
+---
+# Used by Packer: the mounted image root is provisioned through a chroot.
+# Packer passes its own generated inventory with the same values; this file
+# exists so the playbook can also be run by hand against a mounted image:
+#   sudo ansible-playbook -i inventory/image.yml site.yml
+all:
+  hosts:
+    image:
+      ansible_host: /tmp/bole-rootfs
+      ansible_connection: community.general.chroot
+      bole_build_mode: image
+      bole_target: pi

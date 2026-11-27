@@ -1,0 +1,11 @@
+---
+# Provision an already running Raspberry Pi over SSH (live mode).
+# Copy to pi.yml (gitignored), adjust, then:
+#   ansible-playbook -i inventory/pi.yml site.yml --ask-pass --ask-become-pass
+all:
+  hosts:
+    robot:
+      ansible_host: bole.local
+      ansible_user: bole
+      bole_build_mode: live
+      bole_target: pi

@@ -1,0 +1,8 @@
+---
+# bole: provision Ubuntu Server with ROS 2 for Raspberry Pi 4/5.
+# See group_vars/all.yml for build-time settings and AGENTS.md for the
+# image/live mode rules.
+- name: Provision bole
+  hosts: all
+  become: true
+  roles: []

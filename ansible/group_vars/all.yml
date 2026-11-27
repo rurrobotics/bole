@@ -1,0 +1,21 @@
+---
+# =============================================================================
+# bole: BUILD-TIME configuration
+#
+# These values are baked into the image when it is built. Anything you may
+# want to change after flashing (WiFi, passwords, SSH keys, ROS project...)
+# belongs in the runtime file bole.yaml on the boot partition instead; see
+# roles/bootconfig/templates/bole.yaml.j2.
+#
+# Override any value without editing this file:
+#   ./packer/build.sh -var 'ansible_extra_vars=ros_distro=jazzy'
+#   ansible-playbook site.yml -e ros_distro=jazzy
+# =============================================================================
+
+# ---- How the playbook runs ---------------------------------------------------
+# image: provisioning a mounted image via chroot (Packer). Never start services.
+# live:  provisioning a running machine (Vagrant VM or a real Pi over SSH).
+bole_build_mode: live
+# pi: Raspberry Pi hardware (config.txt, firmware, first-boot growpart).
+# vagrant: x86 test VM; Pi-only tasks are skipped.
+bole_target: pi
