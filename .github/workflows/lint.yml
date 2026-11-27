@@ -1,0 +1,60 @@
+---
+name: Lint and test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install tools
+        run: |
+          pip install ansible-core ansible-lint yamllint pytest pyyaml jinja2
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: yamllint
+        run: yamllint --strict .
+
+      - name: ansible-lint
+        working-directory: ansible
+        run: ansible-lint
+
+      - name: shellcheck
+        run: |
+          shellcheck packer/*.sh tests/vagrant/*.sh \
+            ansible/roles/bootconfig/files/bole \
+            ansible/roles/bootconfig/files/bole-firstboot
+
+      - name: Unit tests
+        run: pytest -v tests
+
+  packer:
+    runs-on: ubuntu-24.04
+    env:
+      PACKER_PLUGIN_PATH: ${{ github.workspace }}/.packer/plugins
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-packer@v3
+        with:
+          version: "1.16.2"
+
+      - name: Install builder-arm plugin
+        run: packer/install-plugin.sh
+
+      - name: packer fmt
+        run: packer fmt -check -diff packer/
+
+      - name: packer validate
+        run: packer validate packer/
