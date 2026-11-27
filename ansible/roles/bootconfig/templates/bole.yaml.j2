@@ -1,0 +1,76 @@
+# =============================================================================
+#  bole.yaml: robot settings, applied on EVERY boot
+#
+#  Edit this file from any computer (the SD card's "system-boot" partition),
+#  put the card back and power on. No image rebuild needed.
+#
+#  Tips:
+#   - Put text values in "double quotes", especially passwords and SSIDs.
+#   - Lines starting with # are comments. Indentation (spaces, not tabs) matters.
+#   - If something is wrong, nothing is changed and the reason is written to
+#     bole-error.txt next to this file.
+#   - On the robot: `sudo bole apply` re-applies this file without rebooting.
+# =============================================================================
+
+# Network name of the robot; reachable as <hostname>.local
+hostname: "{{ bole_hostname }}"
+
+# See `timedatectl list-timezones`
+timezone: "{{ bole_timezone }}"
+
+user:
+  # Login user is "{{ bole_user }}". The default password is "bole". CHANGE IT.
+  # Option 1: plain text (anyone with this SD card can read it):
+  # password: "change-me"
+  # Option 2 (better): a hash. Generate one with `openssl passwd -6`:
+  # password_hash: "$6$...."
+
+  # Public SSH keys allowed to log in (contents of ~/.ssh/id_ed25519.pub)
+  ssh_authorized_keys: []
+  #  - "ssh-ed25519 AAAA... me@laptop"
+
+ssh:
+  # Allow password logins. Set to false once your SSH key works.
+  password_auth: {{ 'true' if ssh_password_auth else 'false' }}
+
+wifi:
+  # Two-letter country code; decides which WiFi channels are allowed.
+  country: "{{ wifi_country }}"
+  # Networks to connect to automatically (any that is in range).
+  networks: []
+  #  - ssid: "Home WiFi"
+  #    password: "wifi-password"
+  #  - ssid: "Lab"
+  #    password: "another-password"
+  #    hidden: true          # for networks that don't broadcast their name
+
+ethernet:
+  enabled: true
+  dhcp: true
+  # Static address instead of DHCP (set dhcp: false):
+  # address: "192.168.1.50/24"
+  # gateway: "192.168.1.1"
+  # dns: ["1.1.1.1", "8.8.8.8"]
+
+ros:
+  # Git repository with your ROS 2 package(s). It is cloned into
+  # <workspace>/src and built with colcon on boot. Empty = do nothing.
+  repo: ""
+  # e.g. "https://github.com/you/your_robot.git" or "git@github.com:you/private.git"
+  branch: ""                 # empty = the repository's default branch
+  workspace: "~/ros2_ws"
+  # Pull and rebuild (only if there are new commits) on every boot.
+  update_on_boot: true
+  build_args: "--symlink-install"
+  # Command started after the build and restarted if it crashes. Empty = don't start anything.
+  launch: ""
+  # e.g. "ros2 launch your_robot bringup.launch.py"
+  domain_id: 0
+  # Middleware, e.g. "rmw_cyclonedds_cpp" (the package must be installed). Empty = default.
+  rmw: ""
+  # Private repositories: put an SSH deploy key file next to this file and name it here.
+  deploy_key: ""
+  # e.g. "deploy_key"
+  # Extra environment variables for ROS (shell and launch service)
+  environment: {}
+  #  ROS_AUTOMATIC_DISCOVERY_RANGE: "LOCALHOST"

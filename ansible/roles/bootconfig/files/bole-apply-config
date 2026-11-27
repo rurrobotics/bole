@@ -1,0 +1,575 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Apply bole.yaml from the boot partition to the running system.
+
+Runs on every boot (bole-config.service) before networking starts, so edits
+made to bole.yaml on another computer take effect on the next boot. Run
+``sudo bole-apply-config --now`` to apply changes immediately.
+
+On an invalid bole.yaml nothing is changed, the error is logged to the
+journal and written to bole-error.txt next to bole.yaml (readable from the
+computer used to edit the SD card).
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import hashlib
+import json
+import logging
+import os
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+log = logging.getLogger("bole-apply-config")
+
+MANAGED_HEADER = "# Managed by bole-apply-config from bole.yaml. Edit bole.yaml instead.\n"
+KEYS_BEGIN = "# BEGIN bole.yaml managed keys"
+KEYS_END = "# END bole.yaml managed keys"
+
+HOSTNAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+COUNTRY_RE = re.compile(r"^([A-Z]{2}|00)$")
+ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+RMW_RE = re.compile(r"^rmw_[a-z0-9_]+$")
+HEX64_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+SSH_KEY_PREFIXES = ("ssh-", "ecdsa-", "sk-ssh-", "sk-ecdsa-")
+
+
+class ConfigError(Exception):
+    """bole.yaml is invalid; nothing has been changed."""
+
+
+# --------------------------------------------------------------------------
+# Loading and validation
+# --------------------------------------------------------------------------
+
+
+def defaults(build: dict[str, Any]) -> dict[str, Any]:
+    """Runtime defaults, seeded from the build-time values in build.yaml."""
+    return {
+        "hostname": build.get("hostname", "bole"),
+        "timezone": build.get("timezone", "Etc/UTC"),
+        "user": {
+            "password": None,
+            "password_hash": None,
+            "ssh_authorized_keys": [],
+        },
+        "ssh": {"password_auth": bool(build.get("ssh_password_auth", True))},
+        "wifi": {
+            "country": build.get("wifi_country", "00"),
+            "interface": "wlan0",
+            "networks": [],
+        },
+        "ethernet": {
+            "enabled": True,
+            "dhcp": True,
+            "address": None,
+            "gateway": None,
+            "dns": [],
+        },
+        "ros": {
+            "repo": "",
+            "branch": "",
+            "workspace": "",
+            "update_on_boot": True,
+            "build_args": "--symlink-install",
+            "launch": "",
+            "domain_id": 0,
+            "rmw": "",
+            "deploy_key": "",
+            "environment": {},
+        },
+    }
+
+
+def merge(base: dict[str, Any], override: Any, path: str = "") -> dict[str, Any]:
+    """Deep-merge override into base, rejecting unknown keys (catches typos)."""
+    if override is None:
+        return base
+    if not isinstance(override, dict):
+        raise ConfigError(f"'{path or 'bole.yaml'}' must be a mapping of keys to values")
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        where = f"{path}.{key}" if path else str(key)
+        if key not in base:
+            raise ConfigError(f"unknown setting '{where}' (check the spelling against the template)")
+        if isinstance(base[key], dict) and key != "environment":
+            result[key] = merge(base[key], value, where)
+        else:
+            result[key] = value
+    return result
+
+
+def _require(cond: bool, message: str) -> None:
+    if not cond:
+        raise ConfigError(message)
+
+
+def _is_bool(v: Any) -> bool:
+    return isinstance(v, bool)
+
+
+def validate(cfg: dict[str, Any], root: Path) -> dict[str, Any]:
+    """Validate and normalise a merged config. Returns the normalised copy."""
+    cfg = copy.deepcopy(cfg)
+
+    # hostname
+    host = cfg["hostname"]
+    _require(isinstance(host, str), "'hostname' must be text")
+    host = host.strip().lower()
+    _require(bool(HOSTNAME_RE.match(host)), f"'hostname' {host!r} is invalid: use a-z, 0-9 and '-' (max 63)")
+    cfg["hostname"] = host
+
+    # timezone
+    tz = cfg["timezone"]
+    _require(isinstance(tz, str) and tz and ".." not in tz, "'timezone' must be a name like Europe/Belgrade")
+    _require((root / "usr/share/zoneinfo" / tz).is_file(), f"unknown 'timezone' {tz!r} (see timedatectl list-timezones)")
+
+    # user
+    user = cfg["user"]
+    pw, pw_hash = user["password"], user["password_hash"]
+    _require(not (pw and pw_hash), "set only one of 'user.password' and 'user.password_hash'")
+    if pw is not None:
+        _require(isinstance(pw, str) and pw != "", "'user.password' must be quoted text, e.g. \"s3cret\"")
+    if pw_hash is not None:
+        _require(
+            isinstance(pw_hash, str) and pw_hash.startswith("$"),
+            "'user.password_hash' must be a crypt hash (generate one with: openssl passwd -6)",
+        )
+    keys = user["ssh_authorized_keys"] or []
+    _require(isinstance(keys, list), "'user.ssh_authorized_keys' must be a list")
+    for k in keys:
+        _require(
+            isinstance(k, str) and k.strip().startswith(SSH_KEY_PREFIXES),
+            f"'user.ssh_authorized_keys' entry is not a public key: {str(k)[:40]!r}",
+        )
+    user["ssh_authorized_keys"] = [k.strip() for k in keys]
+
+    # ssh
+    _require(_is_bool(cfg["ssh"]["password_auth"]), "'ssh.password_auth' must be true or false")
+
+    # wifi
+    wifi = cfg["wifi"]
+    country = str(wifi["country"]).upper()
+    _require(bool(COUNTRY_RE.match(country)), "'wifi.country' must be a two-letter country code, e.g. RS")
+    wifi["country"] = country
+    _require(isinstance(wifi["interface"], str) and wifi["interface"], "'wifi.interface' must be text")
+    networks = wifi["networks"] or []
+    _require(isinstance(networks, list), "'wifi.networks' must be a list")
+    normalised = []
+    for i, net in enumerate(networks, 1):
+        where = f"wifi.networks[{i}]"
+        _require(isinstance(net, dict), f"'{where}' must have 'ssid' and 'password'")
+        unknown = sorted(map(str, set(net) - {"ssid", "password", "hidden"}))
+        if unknown:
+            raise ConfigError(f"unknown setting '{where}.{unknown[0]}'")
+        ssid = net.get("ssid")
+        _require(isinstance(ssid, str) and ssid != "", f"'{where}.ssid' must be quoted text")
+        _require(len(ssid.encode()) <= 32, f"'{where}.ssid' is longer than 32 bytes")
+        psk = net.get("password")
+        if psk in (None, ""):
+            psk = None  # open network
+        else:
+            _require(isinstance(psk, str), f"'{where}.password' must be in quotes")
+            _require(
+                8 <= len(psk) <= 63 or bool(HEX64_RE.match(psk)),
+                f"'{where}.password' must be 8-63 characters",
+            )
+        hidden = net.get("hidden", False)
+        _require(_is_bool(hidden), f"'{where}.hidden' must be true or false")
+        normalised.append({"ssid": ssid, "password": psk, "hidden": hidden})
+    wifi["networks"] = normalised
+
+    # ethernet
+    eth = cfg["ethernet"]
+    _require(_is_bool(eth["enabled"]), "'ethernet.enabled' must be true or false")
+    _require(_is_bool(eth["dhcp"]), "'ethernet.dhcp' must be true or false")
+    if eth["enabled"] and not eth["dhcp"]:
+        _require(
+            isinstance(eth["address"], str) and "/" in eth["address"],
+            "'ethernet.address' must be set like 192.168.1.50/24 when 'ethernet.dhcp' is false",
+        )
+    eth["dns"] = eth["dns"] or []
+    _require(isinstance(eth["dns"], list), "'ethernet.dns' must be a list")
+
+    # ros
+    ros = cfg["ros"]
+    for key in ("repo", "branch", "workspace", "build_args", "launch", "rmw", "deploy_key"):
+        if ros[key] is None:
+            ros[key] = ""
+        _require(isinstance(ros[key], str), f"'ros.{key}' must be text")
+    _require(_is_bool(ros["update_on_boot"]), "'ros.update_on_boot' must be true or false")
+    _require(
+        isinstance(ros["domain_id"], int) and not _is_bool(ros["domain_id"]) and 0 <= ros["domain_id"] <= 232,
+        "'ros.domain_id' must be a number between 0 and 232",
+    )
+    _require(ros["rmw"] == "" or bool(RMW_RE.match(ros["rmw"])), "'ros.rmw' must look like rmw_fastrtps_cpp")
+    _require(".." not in Path(ros["deploy_key"]).parts, "'ros.deploy_key' must be a file on the boot partition")
+    if ros["workspace"]:
+        _require(
+            ros["workspace"].startswith(("/", "~")),
+            "'ros.workspace' must be an absolute path or start with ~",
+        )
+    env = ros["environment"] or {}
+    _require(isinstance(env, dict), "'ros.environment' must be a mapping of NAME: value")
+    for k, v in env.items():
+        _require(isinstance(k, str) and bool(ENV_KEY_RE.match(k)), f"'ros.environment' name {k!r} is invalid")
+        _require(isinstance(v, (str, int, float, bool)), f"'ros.environment.{k}' must be a single value")
+    ros["environment"] = env
+    return cfg
+
+
+def load_config(path: Path, build: dict[str, Any], root: Path) -> dict[str, Any]:
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        log.warning("%s not found, using defaults", path)
+        raw = None
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"bole.yaml is not valid YAML: {exc}") from exc
+    return validate(merge(defaults(build), raw), root)
+
+
+# --------------------------------------------------------------------------
+# Rendering (pure functions, unit tested)
+# --------------------------------------------------------------------------
+
+
+def render_netplan(cfg: dict[str, Any]) -> str | None:
+    network: dict[str, Any] = {"version": 2, "renderer": "networkd"}
+    eth = cfg["ethernet"]
+    if eth["enabled"]:
+        e: dict[str, Any] = {"match": {"name": "e*"}, "optional": True}
+        if eth["dhcp"]:
+            e["dhcp4"] = True
+            e["dhcp6"] = True
+        else:
+            e["addresses"] = [eth["address"]]
+            if eth["gateway"]:
+                e["routes"] = [{"to": "default", "via": eth["gateway"]}]
+        if eth["dns"]:
+            e["nameservers"] = {"addresses": list(eth["dns"])}
+        network["ethernets"] = {"bole-eth": e}
+    wifi = cfg["wifi"]
+    if wifi["networks"]:
+        aps: dict[str, Any] = {}
+        for net in wifi["networks"]:
+            ap: dict[str, Any] = {}
+            if net["password"] is not None:
+                ap["password"] = net["password"]
+            if net["hidden"]:
+                ap["hidden"] = True
+            aps[net["ssid"]] = ap
+        network["wifis"] = {
+            wifi["interface"]: {
+                "dhcp4": True,
+                "dhcp6": True,
+                "optional": True,
+                "regulatory-domain": wifi["country"],
+                "access-points": aps,
+            }
+        }
+    if "ethernets" not in network and "wifis" not in network:
+        return None
+    return MANAGED_HEADER + yaml.safe_dump({"network": network}, sort_keys=False, allow_unicode=True)
+
+
+def render_sshd(cfg: dict[str, Any]) -> str:
+    value = "yes" if cfg["ssh"]["password_auth"] else "no"
+    return f"{MANAGED_HEADER}PasswordAuthentication {value}\n"
+
+
+def render_authorized_keys(existing: str, keys: list[str]) -> str:
+    """Replace the managed block, keeping keys added by other means."""
+    lines = existing.splitlines()
+    out, skipping = [], False
+    for line in lines:
+        if line.strip() == KEYS_BEGIN:
+            skipping = True
+            continue
+        if line.strip() == KEYS_END:
+            skipping = False
+            continue
+        if not skipping:
+            out.append(line)
+    while out and not out[-1].strip():
+        out.pop()
+    if keys:
+        if out:
+            out.append("")
+        out += [KEYS_BEGIN, *keys, KEYS_END]
+    return "\n".join(out) + "\n" if out else ""
+
+
+def resolve_workspace(cfg: dict[str, Any], home: str) -> str:
+    ws = cfg["ros"]["workspace"] or "~/ros2_ws"
+    if ws.startswith("~"):
+        ws = home + ws[1:]
+    return ws
+
+
+def render_ros_env(cfg: dict[str, Any], home: str, deploy_key: str | None) -> str:
+    ros = cfg["ros"]
+    values: dict[str, Any] = {
+        "BOLE_ROS_REPO": ros["repo"],
+        "BOLE_ROS_BRANCH": ros["branch"],
+        "BOLE_ROS_WORKSPACE": resolve_workspace(cfg, home),
+        "BOLE_ROS_UPDATE_ON_BOOT": "1" if ros["update_on_boot"] else "0",
+        "BOLE_ROS_BUILD_ARGS": ros["build_args"],
+        "BOLE_ROS_LAUNCH": ros["launch"],
+        "BOLE_ROS_DEPLOY_KEY": deploy_key or "",
+        "ROS_DOMAIN_ID": str(ros["domain_id"]),
+    }
+    if ros["rmw"]:
+        values["RMW_IMPLEMENTATION"] = ros["rmw"]
+    for k, v in ros["environment"].items():
+        values[k] = str(v).lower() if isinstance(v, bool) else str(v)
+    body = "".join(f"{k}={shlex.quote(str(v))}\n" for k, v in values.items())
+    return MANAGED_HEADER + body
+
+
+def render_hosts(existing: str, hostname: str) -> str:
+    line = f"127.0.1.1 {hostname}"
+    lines = existing.splitlines()
+    for i, current in enumerate(lines):
+        if re.match(r"^127\.0\.1\.1\s", current):
+            lines[i] = line
+            break
+    else:
+        lines.insert(1 if lines else 0, line)
+    return "\n".join(lines) + "\n"
+
+
+def password_digest(user: str, cfg: dict[str, Any]) -> str | None:
+    secret = cfg["user"]["password"] or cfg["user"]["password_hash"]
+    if not secret:
+        return None
+    return hashlib.sha256(f"{user}:{secret}".encode()).hexdigest()
+
+
+# --------------------------------------------------------------------------
+# Applying
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class Account:
+    name: str
+    uid: int
+    gid: int
+    home: str
+
+
+@dataclass
+class Context:
+    root: Path
+    config: Path
+    build: dict[str, Any]
+    offline: bool = False  # image build: write files only, run nothing
+    now: bool = False  # apply to the running system immediately
+    changes: list[str] = field(default_factory=list)
+
+    def path(self, p: str) -> Path:
+        return self.root / p.lstrip("/")
+
+    def run(self, cmd: list[str], **kwargs: Any) -> None:
+        if self.offline:
+            log.info("offline, skipping: %s", " ".join(cmd))
+            return
+        log.info("running: %s", " ".join(cmd))
+        subprocess.run(cmd, check=True, **kwargs)
+
+
+def lookup_account(ctx: Context, name: str) -> Account:
+    passwd = ctx.path("/etc/passwd")
+    for line in passwd.read_text().splitlines():
+        parts = line.split(":")
+        if len(parts) >= 7 and parts[0] == name:
+            return Account(name, int(parts[2]), int(parts[3]), parts[5])
+    raise ConfigError(f"user {name!r} does not exist in the image")
+
+
+def write_file(ctx: Context, path: str, content: str, mode: int = 0o644, owner: Account | None = None) -> bool:
+    """Atomically write a file if its content changed. Returns True if changed."""
+    target = ctx.path(path)
+    if target.is_file() and target.read_text() == content and (target.stat().st_mode & 0o777) == mode:
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(content)
+        os.chmod(tmp, mode)
+        if owner and os.geteuid() == 0:
+            os.chown(tmp, owner.uid, owner.gid)
+        os.replace(tmp, target)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    ctx.changes.append(path)
+    log.info("updated %s", path)
+    return True
+
+
+def remove_file(ctx: Context, path: str) -> bool:
+    target = ctx.path(path)
+    if target.exists():
+        target.unlink()
+        ctx.changes.append(path)
+        log.info("removed %s", path)
+        return True
+    return False
+
+
+def load_state(ctx: Context) -> dict[str, Any]:
+    try:
+        return json.loads(ctx.path("/var/lib/bole/state.json").read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def apply(cfg: dict[str, Any], ctx: Context) -> list[str]:
+    account = lookup_account(ctx, ctx.build.get("user", "bole"))
+    home = account.home
+    state = load_state(ctx)
+
+    # hostname
+    if write_file(ctx, "/etc/hostname", cfg["hostname"] + "\n"):
+        ctx.run(["hostname", cfg["hostname"]])
+    hosts = ctx.path("/etc/hosts")
+    write_file(ctx, "/etc/hosts", render_hosts(hosts.read_text() if hosts.exists() else "", cfg["hostname"]))
+
+    # timezone
+    zone = Path("/usr/share/zoneinfo") / cfg["timezone"]
+    localtime = ctx.path("/etc/localtime")
+    if not localtime.is_symlink() or os.readlink(localtime) != str(zone):
+        localtime.unlink(missing_ok=True)
+        localtime.symlink_to(zone)
+        ctx.changes.append("/etc/localtime")
+    write_file(ctx, "/etc/timezone", cfg["timezone"] + "\n")
+
+    # password (applied only when it changed, so /etc/shadow isn't rewritten every boot)
+    digest = password_digest(account.name, cfg)
+    if digest and digest != state.get("password_digest"):
+        secret = cfg["user"]["password"] or cfg["user"]["password_hash"]
+        cmd = ["chpasswd"] + (["-e"] if cfg["user"]["password_hash"] else [])
+        if ctx.root != Path("/"):
+            cmd += ["-R", str(ctx.root)]
+        ctx.run(cmd, input=f"{account.name}:{secret}\n", text=True)
+        if not ctx.offline:
+            state["password_digest"] = digest
+        ctx.changes.append("password")
+
+    # SSH
+    if write_file(ctx, "/etc/ssh/sshd_config.d/05-bole-runtime.conf", render_sshd(cfg)) and ctx.now:
+        ctx.run(["systemctl", "try-reload-or-restart", "ssh.service"])
+    ak_path = f"{home}/.ssh/authorized_keys"
+    ak = ctx.path(ak_path)
+    new_ak = render_authorized_keys(ak.read_text() if ak.exists() else "", cfg["user"]["ssh_authorized_keys"])
+    if new_ak or ak.exists():
+        ssh_dir = ctx.path(f"{home}/.ssh")
+        if not ssh_dir.exists():
+            ssh_dir.mkdir(mode=0o700, parents=True)
+            if os.geteuid() == 0:
+                os.chown(ssh_dir, account.uid, account.gid)
+        write_file(ctx, ak_path, new_ak, mode=0o600, owner=account)
+
+    # Deploy key for private ROS repositories (FAT has no permissions, so copy it)
+    key_dest = f"{home}/.ssh/bole_deploy_key"
+    deploy_key = None
+    if cfg["ros"]["deploy_key"]:
+        src = ctx.config.parent / cfg["ros"]["deploy_key"]
+        if not src.is_file():
+            raise ConfigError(f"'ros.deploy_key' file {cfg['ros']['deploy_key']!r} not found next to bole.yaml")
+        content = src.read_text().replace("\r\n", "\n")
+        if not content.endswith("\n"):
+            content += "\n"
+        ssh_dir = ctx.path(f"{home}/.ssh")
+        if not ssh_dir.exists():
+            ssh_dir.mkdir(mode=0o700, parents=True)
+            if os.geteuid() == 0:
+                os.chown(ssh_dir, account.uid, account.gid)
+        write_file(ctx, key_dest, content, mode=0o600, owner=account)
+        deploy_key = key_dest
+    else:
+        remove_file(ctx, key_dest)
+
+    # ROS environment
+    write_file(ctx, "/etc/bole/ros.env", render_ros_env(cfg, home, deploy_key))
+
+    # Network (last: the most likely to need a retry)
+    netplan = render_netplan(cfg)
+    if netplan is None:
+        changed = remove_file(ctx, "/etc/netplan/60-bole.yaml")
+    else:
+        changed = write_file(ctx, "/etc/netplan/60-bole.yaml", netplan, mode=0o600)
+    if changed or ctx.now:
+        ctx.run(["netplan", "apply" if ctx.now else "generate"])
+
+    if not ctx.offline:
+        write_file(ctx, "/var/lib/bole/state.json", json.dumps(state, indent=2) + "\n", mode=0o600)
+    return ctx.changes
+
+
+def report_error(config: Path, message: str) -> None:
+    log.error("%s", message)
+    try:
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        (config.parent / "bole-error.txt").write_text(
+            f"bole could not apply bole.yaml ({stamp}):\r\n\r\n  {message}\r\n\r\n"
+            "Nothing was changed. Fix bole.yaml and reboot. This file is removed on success.\r\n"
+        )
+    except OSError as exc:  # read-only or missing boot partition
+        log.warning("could not write bole-error.txt: %s", exc)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--root", default="/", type=Path, help="system root (for image builds and tests)")
+    parser.add_argument("--config", type=Path, help="bole.yaml path (default: <root>/boot/firmware/bole.yaml)")
+    parser.add_argument("--build-config", type=Path, help="build.yaml path (default: <root>/etc/bole/build.yaml)")
+    parser.add_argument("--offline", action="store_true", help="only write files, run no commands")
+    parser.add_argument("--now", action="store_true", help="apply network and SSH changes immediately")
+    parser.add_argument("--check", action="store_true", help="only validate bole.yaml")
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    root = args.root
+    config = args.config or root / "boot/firmware/bole.yaml"
+    build_path = args.build_config or root / "etc/bole/build.yaml"
+    try:
+        build = yaml.safe_load(build_path.read_text()) or {}
+    except FileNotFoundError:
+        build = {}
+
+    try:
+        cfg = load_config(config, build, root)
+        if args.check:
+            print(f"{config}: OK")
+            return 0
+        ctx = Context(root=root, config=config, build=build, offline=args.offline, now=args.now)
+        changes = apply(cfg, ctx)
+    except ConfigError as exc:
+        report_error(config, str(exc))
+        return 1
+    except subprocess.CalledProcessError as exc:
+        report_error(config, f"command failed: {' '.join(map(str, exc.cmd))} (exit {exc.returncode})")
+        return 2
+
+    (config.parent / "bole-error.txt").unlink(missing_ok=True)
+    log.info("bole.yaml applied: %s", ", ".join(changes) if changes else "no changes")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
