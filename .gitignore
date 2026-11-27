@@ -1,0 +1,37 @@
+# Packer build outputs and caches
+output/
+packer_cache/
+*.img
+*.img.xz
+*.img.xz.sha256
+crash.log
+
+# Ansible
+*.retry
+ansible/.ansible/
+.ansible/
+
+# Vagrant
+.vagrant/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local overrides and secrets — never commit real credentials
+*.local.yml
+*.local.yaml
+*.auto.pkrvars.hcl
+ansible/inventory/pi.yml
+id_*
+!id_*.pub
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
