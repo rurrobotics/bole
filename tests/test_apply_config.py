@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,8 @@ TEMPLATE = REPO / "ansible/roles/bootconfig/templates/bole.yaml.j2"
 _loader = importlib.machinery.SourceFileLoader("bole_apply_config", str(SCRIPT))
 _spec = importlib.util.spec_from_loader("bole_apply_config", _loader)
 bac = importlib.util.module_from_spec(_spec)
+# dataclasses (Python <= 3.12) look the module up in sys.modules while loading
+sys.modules["bole_apply_config"] = bac
 _loader.exec_module(bac)
 
 BUILD = {
