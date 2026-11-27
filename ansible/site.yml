@@ -5,4 +5,6 @@
 - name: Provision bole
   hosts: all
   become: true
-  roles: []
+  roles:
+    - role: base
+      tags: [base]

@@ -1,0 +1,13 @@
+[all]
+{% if pi_enable_i2c %}
+dtparam=i2c_arm=on
+{% endif %}
+{% if pi_enable_spi %}
+dtparam=spi=on
+{% endif %}
+{% if pi_enable_uart %}
+enable_uart=1
+{% endif %}
+{% for line in pi_config_extra %}
+{{ line }}
+{% endfor %}

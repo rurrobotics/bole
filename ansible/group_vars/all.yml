@@ -19,3 +19,39 @@ bole_build_mode: live
 # pi: Raspberry Pi hardware (config.txt, firmware, first-boot growpart).
 # vagrant: x86 test VM; Pi-only tasks are skipped.
 bole_target: pi
+
+# ---- System ------------------------------------------------------------------
+bole_hostname: bole
+bole_timezone: Europe/Belgrade
+bole_locale: en_US.UTF-8
+
+# Run a full apt dist-upgrade during the build.
+base_apt_upgrade: true
+# Remove snapd (saves ~300 MB and boot time; ROS doesn't need it).
+base_remove_snapd: true
+# Remove unattended-upgrades so a robot never changes packages by itself.
+base_remove_unattended_upgrades: true
+
+base_packages:
+  - ca-certificates
+  - curl
+  - git
+  - gnupg
+  - htop
+  - i2c-tools
+  - locales
+  - nano
+  - python3-yaml
+  - rsync
+  - tmux
+  - vim-tiny
+  - cloud-guest-utils # growpart, used by the first-boot service
+  - openssl
+base_extra_packages: []
+
+# Raspberry Pi hardware interfaces (written to /boot/firmware/config.txt).
+pi_enable_i2c: true
+pi_enable_spi: true
+pi_enable_uart: true
+# Extra lines appended verbatim to config.txt, e.g. ["dtoverlay=pwm-2chan"].
+pi_config_extra: []
