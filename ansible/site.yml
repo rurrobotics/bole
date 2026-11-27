@@ -8,3 +8,5 @@
   roles:
     - role: base
       tags: [base]
+    - role: users
+      tags: [users]

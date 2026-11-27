@@ -1,0 +1,46 @@
+---
+- name: Ensure hardware access groups exist
+  ansible.builtin.group:
+    name: "{{ item }}"
+    system: true
+    state: present
+  loop: [gpio, i2c, spi]
+
+- name: Give hardware groups access to their device nodes
+  ansible.builtin.copy:
+    dest: /etc/udev/rules.d/99-bole-hardware.rules
+    mode: "0644"
+    content: |
+      SUBSYSTEM=="gpio", KERNEL=="gpiochip*", GROUP="gpio", MODE="0660"
+      SUBSYSTEM=="i2c-dev", GROUP="i2c", MODE="0660"
+      SUBSYSTEM=="spidev", GROUP="spi", MODE="0660"
+
+- name: Create default user
+  ansible.builtin.user:
+    name: "{{ bole_user }}"
+    shell: /bin/bash
+    create_home: true
+    groups: "{{ bole_user_groups }}"
+    append: true
+    password: "{{ bole_user_password_hash }}"
+    # Only on creation: bole.yaml may change the password later.
+    update_password: on_create
+
+- name: Configure passwordless sudo
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/90-bole
+    mode: "0440"
+    content: "{{ bole_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    validate: visudo -cf %s
+  when: bole_user_passwordless_sudo | bool
+
+- name: Remove passwordless sudo when disabled
+  ansible.builtin.file:
+    path: /etc/sudoers.d/90-bole
+    state: absent
+  when: not (bole_user_passwordless_sudo | bool)
+
+- name: Lock the root account password
+  ansible.builtin.user:
+    name: root
+    password_lock: true

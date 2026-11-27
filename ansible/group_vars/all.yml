@@ -55,3 +55,22 @@ pi_enable_spi: true
 pi_enable_uart: true
 # Extra lines appended verbatim to config.txt, e.g. ["dtoverlay=pwm-2chan"].
 pi_config_extra: []
+
+# ---- Default user ------------------------------------------------------------
+# The image ships with this user. Change the password after flashing via
+# bole.yaml (user.password / user.password_hash) — the default is public!
+bole_user: bole
+# SHA-512 crypt hash of the default password "bole".
+# Generate your own with:  openssl passwd -6
+bole_user_password_hash: "$6$bolesalt0$YdTj6oP0AVUePff2yPrmQcUCE8Ym22mxiwG4oaTZkf5m7pAFXXkLLup5.k1wTT02/uurhNT0iy82oriiipOJ5/"
+bole_user_groups:
+  - adm
+  - sudo
+  - dialout
+  - video
+  - plugdev
+  - gpio
+  - i2c
+  - spi
+# Allow sudo without a password (convenient for development robots).
+bole_user_passwordless_sudo: false
