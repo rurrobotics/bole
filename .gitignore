@@ -35,3 +35,7 @@ id_*
 .idea/
 *.swp
 .DS_Store
+
+# Local Packer plugins and Ansible collections
+.packer/
+ansible/collections/
